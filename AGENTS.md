@@ -192,13 +192,18 @@ Or manually:
 ```
 cd ~/projects/finance-spreadsheet && git pull origin main
 cd expense-ai-service && bun install
-sudo systemctl restart expense-ai-service
+systemctl --user restart expense-ai-service
 ```
 
+> **Warning**: The old directory `~/projects/expense-ai-service-old-backup-20260302`
+> is a backup of the previous standalone service directory. It is NOT in use and can
+> be safely deleted once confirmed unnecessary.
+
 Key VPS paths:
-- **Systemd service**: `expense-ai-service` (unit file at `/etc/systemd/system/expense-ai-service.service`)
+- **Service directory**: `~/projects/finance-spreadsheet/expense-ai-service/`
+- **Systemd service**: user-level unit at `~/.config/systemd/user/expense-ai-service.service`
 - **Service port**: 3001 (proxied via nginx)
-- **Logs**: `sudo journalctl -u expense-ai-service -f`
+- **Logs**: `journalctl --user -u expense-ai-service -f`
 - **Health check**: `curl http://127.0.0.1:3001/health`
 
 ### MCP Configuration

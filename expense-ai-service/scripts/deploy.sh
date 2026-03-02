@@ -7,6 +7,14 @@
 
 set -e
 
+# Non-interactive SSH sessions don't load .bashrc/.profile, so bun and opencode
+# won't be on PATH. Export them explicitly.
+export PATH="/home/mugnimaestra/.bun/bin:/home/mugnimaestra/.opencode/bin:$PATH"
+
+# systemctl --user requires XDG_RUNTIME_DIR, which may not be set in
+# non-interactive SSH sessions.
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+
 # Configuration
 REPO_DIR=~/projects/finance-spreadsheet
 SERVICE_DIR="$REPO_DIR/expense-ai-service"
@@ -33,13 +41,13 @@ echo ""
 
 # Restart service
 echo "[3/4] Restarting service..."
-sudo systemctl restart "$SERVICE_NAME"
+systemctl --user restart "$SERVICE_NAME"
 echo ""
 
 # Check status
 echo "[4/4] Checking service status..."
 sleep 2
-sudo systemctl status "$SERVICE_NAME" --no-pager
+systemctl --user status "$SERVICE_NAME" --no-pager
 echo ""
 
 # Quick health check
