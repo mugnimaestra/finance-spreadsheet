@@ -170,12 +170,36 @@ The expense-tracker skill enables AI to:
 The skill is invoked by an HTTP API service running at:
 - **URL**: `https://opencode-agent.mugnimaestra.dev`
 - **VPS IP**: `155.94.154.237`
-- **Repo**: `~/projects/expense-ai-service` on VPS
+- **Repo on VPS**: `~/projects/finance-spreadsheet/expense-ai-service` (git-based)
+- **Full repo clone**: `~/projects/finance-spreadsheet` → `git@github.com:mugnimaestra/finance-spreadsheet.git`
+- **Convenience symlink**: `~/projects/expense-ai-service-git` → service directory
 
 The service wraps OpenCode CLI and exposes endpoints for:
 - `POST /api/expense/extract/text` - Extract from text
 - `POST /api/expense/extract/image` - Extract from receipt image
 - `POST /api/expense/write` - Write to Google Sheets
+
+### VPS Deployment
+The VPS uses git-based deployment. To deploy changes:
+
+1. Push changes to `main` branch on GitHub
+2. SSH to VPS and run the deploy script:
+   ```
+   ssh mugnimaestra@155.94.154.237 'cd ~/projects/finance-spreadsheet/expense-ai-service && bash scripts/deploy.sh'
+   ```
+
+Or manually:
+```
+cd ~/projects/finance-spreadsheet && git pull origin main
+cd expense-ai-service && bun install
+sudo systemctl restart expense-ai-service
+```
+
+Key VPS paths:
+- **Systemd service**: `expense-ai-service` (unit file at `/etc/systemd/system/expense-ai-service.service`)
+- **Service port**: 3001 (proxied via nginx)
+- **Logs**: `sudo journalctl -u expense-ai-service -f`
+- **Health check**: `curl http://127.0.0.1:3001/health`
 
 ### MCP Configuration
 MCP servers are configured in the global OpenCode config at `~/.config/opencode/opencode.json` on the VPS:
