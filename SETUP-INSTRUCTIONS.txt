@@ -1,0 +1,128 @@
+EXPENSE TRACKER - SETUP GUIDE
+==============================
+
+HOW TO IMPORT INTO GOOGLE SHEETS
+--------------------------------
+1. Go to Google Sheets (sheets.google.com)
+2. Create a new spreadsheet
+3. File → Import → Upload → Select "expense-tracker-template.csv"
+4. Choose "Replace spreadsheet" → Click "Import data"
+
+
+IMPORTANT: SETTING UP IDR CURRENCY FORMAT
+-----------------------------------------
+After importing, you MUST apply currency formatting to the Amount column:
+
+1. Click on column G header (Amount column) to select the entire column
+2. Go to Format → Number → More Formats → Custom number format
+3. Enter this format: #,##0 "IDR"
+   OR simply: Format → Number → Currency → Indonesian Rupiah (IDR)
+4. This will display plain numbers like 50000 as Rp50,000
+
+Note: Enter amounts as PLAIN NUMBERS ONLY (e.g., 50000) without currency symbols.
+The formatting will automatically add "Rp" and thousand separators.
+
+
+TIMESTAMP COLUMN
+----------------
+1. Column A stores the full date/time in ISO 8601 (YYYY-MM-DDTHH:MM:SS).
+2. Column B (Date) should match the date portion of Column A.
+
+
+SETTING UP DROPDOWNS (Data Validation)
+--------------------------------------
+This prevents typos and makes data entry faster!
+
+1. Select the entire "Category" column (Column C)
+2. Go to Data → Data validation → Add rule
+3. Criteria: "Dropdown (from a range)" or "Dropdown"
+4. Enter these options:
+   - Food & Dining
+   - Transportation
+   - Housing & Utilities
+   - Subscriptions
+   - Shopping
+   - Health
+   - Entertainment
+   - Education
+   - Work/Business
+   - Other
+
+5. Repeat for "Payment Method" column (Column H):
+   - Cash
+   - Credit Card
+   - Debit Card
+   - E-Wallet
+   - Bank Transfer
+
+6. Repeat for "Meal Type" column (Column I):
+   - Breakfast
+   - Lunch
+   - Dinner
+   - Snack
+
+
+SUBCATEGORY OPTIONS (Reference)
+-------------------------------
+Food & Dining:      Groceries, Restaurants, Coffee/Snacks, Delivery
+Transportation:     Gas/Fuel, Public Transit, Parking, Ride Share, Maintenance
+Housing & Utilities: Rent, Electricity, Water, Internet, Phone
+Subscriptions:      Streaming, Software, Memberships
+Shopping:           Clothing, Electronics, Home, Personal Care
+Health:             Medical, Pharmacy, Fitness, Insurance
+Entertainment:      Movies, Games, Events, Hobbies
+Education:          Courses, Books, Supplies
+Work/Business:      Supplies, Travel, Equipment
+
+
+USEFUL FORMULAS (Add to a "Summary" sheet)
+------------------------------------------
+Create a new sheet tab called "Summary" and add these:
+
+Total Expenses:
+=SUM(Expenses!G:G)
+
+Total This Month:
+=SUMIF(Expenses!B:B,">="&DATE(YEAR(TODAY()),MONTH(TODAY()),1),Expenses!G:G)
+
+Total by Category:
+=SUMIF(Expenses!C:C,"Food & Dining",Expenses!G:G)
+
+Count of Transactions:
+=COUNTA(Expenses!A2:A)
+
+Average Transaction:
+=AVERAGE(Expenses!G:G)
+
+
+PIVOT TABLE FOR MONTHLY SUMMARY
+-------------------------------
+1. Select all your data (Ctrl+A)
+2. Insert → Pivot table → New sheet
+3. Rows: Add "Category"
+4. Columns: Add "Date" (group by Month)
+5. Values: Add "Amount" (SUM)
+
+
+CONDITIONAL FORMATTING (Optional)
+---------------------------------
+Highlight high expenses:
+1. Select Amount column
+2. Format → Conditional formatting
+3. "Greater than" → 100000 → Red background
+
+Color code categories:
+1. Select Category column
+2. Format → Conditional formatting
+3. "Text is exactly" → "Food & Dining" → Light orange
+
+
+TIPS FOR DAILY USE
+------------------
+✓ Input expenses immediately after purchase
+✓ Enter amounts as plain numbers only (e.g., 50000 not Rp50,000)
+✓ IDR uses whole numbers - no decimal places needed
+✓ Be descriptive in the Description field
+✓ Use consistent merchant names (e.g., always "Indomaret" not "indomaret")
+✓ Review weekly to catch patterns
+✓ Set a monthly budget and compare against totals

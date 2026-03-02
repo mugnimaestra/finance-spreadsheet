@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "google-docs-mcp": {
+      "type": "local",
+      "command": [
+        "node",
+        "/Users/mugnihadi/.agents/mcp-servers/google-docs-mcp/dist/server.js"
+      ],
+      "environment": {},
+      "enabled": true
+    }
+  }
+}

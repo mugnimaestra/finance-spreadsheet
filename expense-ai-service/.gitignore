@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+service.log
+
+# Backups
+*.bak
+*.backup
+
+# Test files
+test-*.ts
+extract-*.ts
+temp-*.ts
+
+# OS files
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Build outputs
+dist/
+build/

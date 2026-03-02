@@ -1,0 +1,16 @@
+Timestamp,Date,Category,Subcategory,Description,Merchant/Store,Amount,Payment Method,Meal Type,Notes
+2026-01-24T19:30:00,2026-01-24,Food & Dining,Restaurants,Dinner - Nasi Goreng,Warteg Bahari,35000,Cash,Dinner,
+2026-01-24T14:15:00,2026-01-24,Transportation,Ride Share,GoJek to office,GoJek,25000,E-Wallet,,
+2026-01-23T20:45:00,2026-01-23,Food & Dining,Delivery,Dinner - Ayam Geprek,GoFood,45000,E-Wallet,Dinner,Late work dinner
+2026-01-23T08:30:00,2026-01-23,Food & Dining,Coffee/Snacks,Kopi Susu,Kopi Kenangan,22000,E-Wallet,Snack,
+2026-01-22T18:00:00,2026-01-22,Food & Dining,Groceries,Weekly groceries - rice, vegetables, chicken,Indomaret,285000,Debit Card,,
+2026-01-21T12:20:00,2026-01-21,Food & Dining,Restaurants,Lunch - Soto Ayam,Warung Soto Pak Min,28000,Cash,Lunch,
+2026-01-20T19:15:00,2026-01-20,Entertainment,Movies,Movie ticket - Pengabdi Setan 2,CGV Cinemas,75000,Credit Card,,
+2026-01-19T16:45:00,2026-01-19,Shopping,Clothing,Batik shirt,Pasar Tanah Abang,150000,Cash,,For office event
+2026-01-18T10:30:00,2026-01-18,Transportation,Gas/Fuel,Full tank - Pertalite,Pertamina,320000,Credit Card,,
+2026-01-17T21:00:00,2026-01-17,Subscriptions,Streaming,Monthly subscription,Netflix,186000,Credit Card,,
+2026-01-16T13:45:00,2026-01-16,Health,Medical,Doctor consultation,Kimia Farma,125000,E-Wallet,,
+2026-01-15T07:50:00,2026-01-15,Food & Dining,Breakfast,Breakfast - Nasi Uduk,Warung Bu Yati,18000,Cash,Breakfast,
+2026-01-14T20:30:00,2026-01-14,Shopping,Electronics,Phone charger cable,Erafone,85000,Debit Card,,
+2026-01-13T11:15:00,2026-01-13,Transportation,Parking,Mall parking,Grand Indonesia,15000,Cash,,
+2026-01-12T15:30:00,2026-01-12,Education,Books,Programming textbook,Gramedia,175000,Credit Card,,
