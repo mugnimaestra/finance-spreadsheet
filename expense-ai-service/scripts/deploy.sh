@@ -29,23 +29,28 @@ echo ""
 cd "$REPO_DIR"
 
 # Pull latest changes
-echo "[1/4] Pulling latest changes..."
+echo "[1/5] Pulling latest changes..."
 git pull origin main
 echo ""
 
 # Install dependencies
-echo "[2/4] Installing dependencies..."
+echo "[2/5] Installing dependencies..."
 cd "$SERVICE_DIR"
 bun install
 echo ""
 
+# Sync OpenCode agent configuration
+echo "[3/5] Syncing OpenCode agent configuration..."
+bash "$SERVICE_DIR/scripts/setup-opencode-config.sh"
+echo ""
+
 # Restart service
-echo "[3/4] Restarting service..."
+echo "[4/5] Restarting service..."
 systemctl --user restart "$SERVICE_NAME"
 echo ""
 
 # Check status
-echo "[4/4] Checking service status..."
+echo "[5/5] Checking service status..."
 sleep 2
 systemctl --user status "$SERVICE_NAME" --no-pager
 echo ""

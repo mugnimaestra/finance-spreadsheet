@@ -19,6 +19,7 @@ interface ExtractTextRequest {
   callbackUrl?: string  // If provided, use async mode
   chatId?: number       // For webhook context
   messageId?: number    // For webhook context
+  metadata?: { userId?: number; timestamp?: number }
 }
 
 interface ExtractImageRequest {
@@ -27,6 +28,7 @@ interface ExtractImageRequest {
   callbackUrl?: string  // If provided, use async mode
   chatId?: number       // For webhook context
   messageId?: number    // For webhook context
+  metadata?: { userId?: number; timestamp?: number }
 }
 
 interface WriteExpenseRequest {
@@ -105,7 +107,8 @@ expenseRoutes.post('/extract/text', async (c) => {
         {
           model: body.model,
           chatId: body.chatId,
-          messageId: body.messageId
+          messageId: body.messageId,
+          metadata: body.metadata
         }
       )
 
@@ -198,7 +201,8 @@ expenseRoutes.post('/extract/image', async (c) => {
         {
           model: body.model,
           chatId: body.chatId,
-          messageId: body.messageId
+          messageId: body.messageId,
+          metadata: body.metadata
         }
       )
 

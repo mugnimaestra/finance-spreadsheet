@@ -206,6 +206,40 @@ Key VPS paths:
 - **Logs**: `journalctl --user -u expense-ai-service -f`
 - **Health check**: `curl http://127.0.0.1:3001/health`
 
+### Shared Secrets
+
+The following secrets must be synchronized between the Cloudflare Worker and the VPS:
+
+| Secret | Cloudflare Worker | VPS .env | Purpose |
+|--------|-------------------|----------|---------|
+| `WEBHOOK_SECRET` | `wrangler secret put WEBHOOK_SECRET` | `WEBHOOK_SECRET=<value>` in `.env` | Authenticates webhook callbacks from VPS → Cloudflare Worker |
+| `AI_SERVICE_TOKEN` | Set in Worker secrets | Must match `API_TOKEN` in VPS `.env` | Authenticates API requests from Worker → VPS |
+
+If webhooks return 401 Unauthorized, the most likely cause is a mismatched or missing `WEBHOOK_SECRET`.
+
+To rotate the WEBHOOK_SECRET:
+1. Generate a new secret: `openssl rand -hex 32`
+2. Set on VPS: `bash expense-ai-service/scripts/set-webhook-secret.sh <new-secret>`
+3. Set on Worker: `cd telegram-bot-cloudflare && npx wrangler secret put WEBHOOK_SECRET`
+
+### VPS Service Stability
+
+The service runs as a **user-level systemd unit** (not root). Key stability settings:
+
+- **Linger**: `loginctl enable-linger mugnimaestra` is **required** and enabled.
+  Without linger, user services die when the last SSH session closes.
+  Verify with: `loginctl show-user mugnimaestra -p Linger` (must be `yes`).
+- **Restart policy**: `Restart=always` with `RestartSec=5` — auto-restarts on any exit.
+- **Restart rate limit**: `StartLimitBurst=5` / `StartLimitIntervalSec=60` — max 5 restarts per minute.
+- **Memory cap**: `MemoryMax=512M` — protects the 1.9 GiB VPS from OOM.
+- **V8 heap cap**: `NODE_OPTIONS=--max-old-space-size=384` — secondary memory guard.
+- **Service enabled**: `systemctl --user is-enabled expense-ai-service` → `enabled`.
+
+Common troubleshooting:
+- Service killed with SIGKILL (status=9) → check linger, check VPS memory with `free -h`.
+- Service not starting after reboot → verify linger and `systemctl --user is-enabled`.
+- OOM → reduce concurrent OpenCode processes (already limited to 1 in code).
+
 ### MCP Configuration
 MCP servers are configured in the global OpenCode config at `~/.config/opencode/opencode.json` on the VPS:
 ```json
@@ -224,18 +258,41 @@ MCP servers are configured in the global OpenCode config at `~/.config/opencode/
 
 The OpenCode CLI is configured to use the following AI model on the VPS:
 
-- **Current Model**: `google/gemini-3-flash`
-- **Config Location**: `~/.config/opencode/opencode.json`
-- **Provider**: Google AI (Gemini)
-- **API Endpoint**: Google AI Studio / Vertex AI
+- **Current Model**: `opencode/big-pickle` (free model)
+- **Custom Agent**: `general-opus` (claude-opus-4.6 via GitHub Copilot)
+- **Provider**: OpenCode (free) → GitHub Copilot (delegated)
+- **Config Location**: `~/.config/opencode/opencode.json` (VPS)
 
-To change the model, edit the `model` and `small_model` fields in the OpenCode config file.
+To change the model, edit the `AI_MODEL` environment variable in the `.env` file on VPS.
+
+The agent wrapper pattern:
+- Uses free `chutes/MiniMaxAI/MiniMax-M2.5-TEE` model which delegates to `@general-opus`
+- The `general-opus` subagent uses Claude Opus for actual expense extraction
+- Toggle: Set `OPENCODE_AGENT_WRAPPER=false` to disable wrapper and use model directly
 
 ### Integration with Telegram Bot
 The expense tracking feature is exposed via the `telegram-bot-cloudflare` project, allowing users to:
 - Send expense messages like "Makan siang warteg 25rb cash"
 - Send receipt photos for automatic extraction
 - Confirm and save expenses to Google Sheets
+
+### KV Eventual Consistency (Fixed 2026-03-06)
+
+Cloudflare KV is eventually consistent — writes may not be visible to reads from
+other edge locations for up to 60 seconds. This caused a bug where pressing
+"Konfirmasi" immediately after OCR processing showed "No data to save".
+
+Mitigations applied:
+- Session TTL extended from 5 to 15 minutes (handles slow VPS processing).
+- Webhook handler (`handleExpenseWebhook.ts`) creates a fallback session via
+  `setSession()` when `setPendingExpense()` fails; gates the confirmation UI
+  behind a `kvWriteSucceeded` flag.
+- Callback handler (`handleExpenseCallback.ts`) retries KV reads 3× with 1.5s
+  delays when `pendingExpense` is missing.
+- `userId` metadata now propagates through the full async pipeline:
+  Telegram Bot → VPS job queue → webhook callback.
+
+If KV consistency issues recur, consider migrating session state to Durable Objects.
 
 ## Out of scope
 - Do not add personal financial data.

@@ -56,15 +56,15 @@ const DEFAULT_MODEL = MODEL_CHAIN[0];
 
 /**
  * Agent wrapper pattern: 
- * When enabled, uses a free model that delegates to a custom agent (general-gemini)
+ * When enabled, uses a free model that delegates to a custom agent (general-opus)
  * This creates a two-hop system: free model → custom agent → actual work
  * Similar to discord-trading-monitor's opencode-agent-wrapper
  */
 const USE_AGENT_WRAPPER = process.env.OPENCODE_AGENT_WRAPPER !== "false"; // default true
 
-const AGENT_WRAPPER_MODEL = "opencode/big-pickle";
+const AGENT_WRAPPER_MODEL = "chutes/MiniMaxAI/MiniMax-M2.5-TEE";
 
-const AGENT_DELEGATION_SUFFIX = "\n\ndelegate this task to @general-gemini";
+const AGENT_DELEGATION_SUFFIX = "\n\ndelegate this task into @general-opus";
 
 // ============================================================================
 // Constants

@@ -20,6 +20,7 @@ export interface ExpenseJob {
   model?: string
   chatId?: number
   messageId?: number
+  metadata?: { userId?: number; timestamp?: number }
   result?: ExpenseData
   error?: string
   createdAt: number
@@ -33,6 +34,7 @@ interface WebhookPayload {
   error?: string
   chatId?: number
   messageId?: number
+  metadata?: { userId?: number; timestamp?: number }
 }
 
 // ============================================================================
@@ -59,7 +61,7 @@ function generateJobId(): string {
 export function createImageJob(
   imageUrl: string, 
   callbackUrl: string,
-  options?: { model?: string; chatId?: number; messageId?: number }
+  options?: { model?: string; chatId?: number; messageId?: number; metadata?: { userId?: number; timestamp?: number } }
 ): string {
   const id = generateJobId()
   
@@ -72,6 +74,7 @@ export function createImageJob(
     model: options?.model,
     chatId: options?.chatId,
     messageId: options?.messageId,
+    metadata: options?.metadata,
     createdAt: Date.now()
   }
   
@@ -87,7 +90,7 @@ export function createImageJob(
 export function createTextJob(
   text: string, 
   callbackUrl: string,
-  options?: { model?: string; chatId?: number; messageId?: number }
+  options?: { model?: string; chatId?: number; messageId?: number; metadata?: { userId?: number; timestamp?: number } }
 ): string {
   const id = generateJobId()
   
@@ -100,6 +103,7 @@ export function createTextJob(
     model: options?.model,
     chatId: options?.chatId,
     messageId: options?.messageId,
+    metadata: options?.metadata,
     createdAt: Date.now()
   }
   
@@ -196,7 +200,8 @@ async function processNextJob(): Promise<void> {
       success: true,
       data: extractResult.data,
       chatId: job.chatId,
-      messageId: job.messageId
+      messageId: job.messageId,
+      metadata: job.metadata
     })
     
   } catch (error) {
@@ -216,7 +221,8 @@ async function processNextJob(): Promise<void> {
       success: false,
       error: errorMessage,
       chatId: job.chatId,
-      messageId: job.messageId
+      messageId: job.messageId,
+      metadata: job.metadata
     })
   }
   
