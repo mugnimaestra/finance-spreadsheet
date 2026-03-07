@@ -266,7 +266,7 @@ The OpenCode CLI is configured to use the following AI model on the VPS:
 To change the model, edit the `AI_MODEL` environment variable in the `.env` file on VPS.
 
 The agent wrapper pattern:
-- Uses free `chutes/MiniMaxAI/MiniMax-M2.5-TEE` model which delegates to `@general-opus`
+- Uses free `opencode/big-pickle` model which delegates to `@general-opus`
 - The `general-opus` subagent uses Claude Opus for actual expense extraction
 - Toggle: Set `OPENCODE_AGENT_WRAPPER=false` to disable wrapper and use model directly
 
