@@ -3,7 +3,7 @@ import { logger } from 'hono/logger'
 import { cors } from 'hono/cors'
 import { healthRoutes } from './routes/health'
 import { expenseRoutes } from './routes/expense'
-import { startCleanupScheduler } from './services/cleanup-scheduler'
+import { startCleanupScheduler, stopCleanupScheduler } from './services/cleanup-scheduler'
 
 const app = new Hono()
 
@@ -40,8 +40,48 @@ startCleanupScheduler().catch((error) => {
   console.error('Failed to start cleanup scheduler:', error)
 })
 
-// Export for Bun runtime
-export default {
+// Start server explicitly to get server instance for graceful shutdown
+const server = Bun.serve({
   port,
   fetch: app.fetch,
+})
+
+console.log(`Expense AI Service listening on port ${server.port}`)
+
+// ============================================================================
+// Graceful Shutdown
+// ============================================================================
+
+let isShuttingDown = false
+
+async function shutdown(signal: string): Promise<void> {
+  if (isShuttingDown) return
+  isShuttingDown = true
+
+  console.log(`[Shutdown] Received ${signal}, shutting down gracefully...`)
+
+  // 1. Stop accepting new connections
+  try {
+    server.stop()
+    console.log('[Shutdown] Server stopped accepting new connections')
+  } catch (err) {
+    console.error('[Shutdown] Error stopping server:', err)
+  }
+
+  // 2. Stop cleanup scheduler
+  try {
+    stopCleanupScheduler()
+  } catch (err) {
+    console.error('[Shutdown] Error stopping cleanup scheduler:', err)
+  }
+
+  // 3. Give in-flight requests a moment to complete
+  await new Promise((resolve) => setTimeout(resolve, 2000))
+
+  console.log('[Shutdown] Graceful shutdown complete')
+  process.exit(0)
 }
+
+// Register signal handlers
+process.on('SIGTERM', () => shutdown('SIGTERM'))
+process.on('SIGINT', () => shutdown('SIGINT'))
