@@ -238,6 +238,41 @@ function findAllBalancedJsonCandidates(s: string): string[] {
 }
 
 /**
+ * Parse opencode --format json NDJSON stdout and return the concatenated
+ * text from all `text` events, in order.
+ *
+ * opencode emits one JSON object per line. We only care about events with
+ * type === "text", whose .part.text holds the actual model response chunks.
+ *
+ * Lines that are not valid JSON are skipped silently (defensive).
+ */
+function extractTextFromOpencodeJsonStream(output: string): string {
+  const lines = output.split("\n");
+  const chunks: string[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const evt = JSON.parse(trimmed);
+      if (
+        evt &&
+        typeof evt === "object" &&
+        evt.type === "text" &&
+        evt.part &&
+        typeof evt.part.text === "string"
+      ) {
+        chunks.push(evt.part.text);
+      }
+    } catch {
+      // not a JSON line — skip
+    }
+  }
+
+  return chunks.join("");
+}
+
+/**
  * Extracts JSON from opencode CLI output.
  *
  * Handles:
@@ -248,6 +283,26 @@ function findAllBalancedJsonCandidates(s: string): string[] {
  * - Multiple {...} candidates (returns the last valid one)
  */
 function extractJsonFromOutput(output: string): string | null {
+  // Step 0: if this looks like an opencode --format json NDJSON stream
+  // (one JSON object per line), unwrap it to the concatenated text content.
+  // Heuristic: first non-empty line parses as JSON with a "type" field.
+  const firstNonEmpty = output.split("\n").map(l => l.trim()).find(Boolean);
+  if (firstNonEmpty && firstNonEmpty.startsWith("{")) {
+    try {
+      const probe = JSON.parse(firstNonEmpty);
+      if (probe && typeof probe === "object" && typeof probe.type === "string") {
+        const unwrapped = extractTextFromOpencodeJsonStream(output);
+        if (unwrapped.trim()) {
+          // Recurse with the unwrapped text so all the existing fence /
+          // candidate-balanced extraction logic still applies.
+          return extractJsonFromOutput(unwrapped);
+        }
+      }
+    } catch {
+      // fall through to legacy path
+    }
+  }
+
   // Step 1: strip noise (ANSI codes + opencode header line).
   let cleaned = output.replace(/\x1b\[[0-9;]*m/g, "");
   cleaned = cleaned.replace(/^>\s*build\s*·.*$/gm, "");
@@ -299,12 +354,16 @@ function extractJsonFromOutput(output: string): string | null {
 
   // Step 4: diagnostic logging when extraction fails.
   console.error(
-    "[extractJsonFromOutput] Failed to extract JSON. Output (first 500):",
-    cleaned.slice(0, 500),
+    "[extractJsonFromOutput] Failed to extract JSON.",
+    `raw_len=${output.length} cleaned_len=${cleaned.length}`,
   );
   console.error(
-    "[extractJsonFromOutput] Output (last 500):",
-    cleaned.slice(-500),
+    "[extractJsonFromOutput] Raw output (first 500):",
+    output.slice(0, 500),
+  );
+  console.error(
+    "[extractJsonFromOutput] Raw output (last 500):",
+    output.slice(-500),
   );
   return null;
 }
@@ -472,6 +531,13 @@ async function executeOpenCode(args: string[], signal?: AbortSignal): Promise<st
 
     if (exitCode !== 0) {
       throw new Error(`opencode exited with code ${exitCode}: ${stderr || stdout}`);
+    }
+
+    // Detect silent failures: provider returned no output but wrote to stderr
+    // (e.g. OpenRouter free router rejecting `tool_choice` for image requests
+    // surfaces as exit-0 + empty stdout + non-empty stderr).
+    if (stdout.trim() === "" && stderr.trim() !== "") {
+      throw new Error(`opencode produced no output. stderr: ${stderr.trim()}`);
     }
 
     return stdout;
@@ -656,7 +722,7 @@ export async function extractExpenseFromText(
     const fullPrompt = `${prompt}\n\nHere is the text to extract expense information from:\n\n${text}`;
 
     const result = await executeWithModelFallback(
-      (model) => ["run", "-m", model, fullPrompt],
+      (model) => ["run", "-m", model, "--format", "json", "--", fullPrompt],
       { operation: "extract-text" },
       preferredModel
     );
@@ -703,7 +769,7 @@ export async function extractExpenseFromImage(
     const prompt = getExtractionPrompt(true);
 
     const result = await executeWithModelFallback(
-      (model) => ["run", "-m", model, "-f", imagePath, "--", prompt],
+      (model) => ["run", "-m", model, "--format", "json", "-f", imagePath, "--", prompt],
       { operation: "extract-image" },
       preferredModel
     );
