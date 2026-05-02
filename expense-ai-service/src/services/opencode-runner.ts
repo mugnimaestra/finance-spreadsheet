@@ -117,30 +117,54 @@ function releaseSlot(): void {
 
 const getExtractionPrompt = (isImage: boolean): string => {
   const sourceType = isImage ? "receipt/image" : "text";
-  
-  return `You are an expense extraction assistant. Extract expense information from the provided ${sourceType} and return ONLY a valid JSON object matching this exact structure:
 
-{
-  "timestamp": "ISO 8601 timestamp of when the expense occurred (e.g., 2024-01-15T14:30:00+07:00)",
-  "date": "Date in YYYY-MM-DD format",
-  "category": "One of: Food & Dining, Transportation, Housing & Utilities, Subscriptions, Shopping, Health, Entertainment, Education, Work/Business, Other",
-  "subcategory": "More specific subcategory within the main category",
-  "description": "Brief description of the expense",
-  "merchant": "Name of the merchant/store/vendor",
-  "amount": <integer amount in IDR (Indonesian Rupiah), no decimals>,
-  "paymentMethod": "One of: Cash, Credit Card, Debit Card, E-Wallet, Bank Transfer",
-  "mealType": "Only for Food & Dining category - one of: Breakfast, Lunch, Dinner, Snack (omit if not applicable)",
-  "notes": "Any additional notes or details (optional, omit if not needed)"
-}
+  const imageSection = isImage
+    ? `
 
-IMPORTANT RULES:
-1. Return ONLY the JSON object, no additional text or markdown
-2. Amount MUST be an integer in IDR (Indonesian Rupiah)
-3. If the original amount is in a different currency, convert it to IDR
-4. mealType should ONLY be included for "Food & Dining" category
-5. Use the current date/time if not explicitly provided
-6. Make reasonable inferences for missing fields based on context
-7. For category, always use one of the exact values listed above`;
+IMAGE/RECEIPT:
+- Amount: TOTAL/JUMLAH/GRAND TOTAL/BAYAR (use largest if multiple).
+- Payment: TUNAI/CASH, KARTU KREDIT/CC, KARTU DEBIT/DEBIT, GOPAY/OVO/DANA/QRIS, TRANSFER/TF.
+- Date formats: "27 Jan 2026", "27/01/2026", "27-01-2026".
+- Merchant: from receipt header.
+- If unclear, best guess — DO NOT refuse. Empty string only for truly missing fields.`
+    : "";
+
+  return `OUTPUT FORMAT: Raw JSON only. No prose. No reasoning. No preamble. No markdown code fences. No explanation. Start your response with \`{\` and end with \`}\`.
+Your entire response must be exactly one JSON object that satisfies \`JSON.parse()\` on the first attempt.
+
+Extract expense info from the provided ${sourceType}.
+
+SCHEMA (flat, top-level only):
+- Required: timestamp, date, category, subcategory, description, merchant, amount, paymentMethod
+- Optional: mealType, notes
+
+ENUMS (exact, case-sensitive):
+- category: Food & Dining | Transportation | Housing & Utilities | Subscriptions | Shopping | Health | Entertainment | Education | Work/Business | Other
+- paymentMethod: Cash | Credit Card | Debit Card | E-Wallet | Bank Transfer
+- mealType (only if Food & Dining; else omit): Breakfast | Lunch | Dinner | Snack
+
+FIELD RULES:
+- amount: integer IDR, no decimals/separators/symbols. Foreign currency → convert at ~16,000 IDR/USD and add notes "Converted from <ORIG> <CURRENCY>".
+- timestamp: ISO 8601 with +07:00 (Asia/Jakarta). If absent, use current local time.
+- date: YYYY-MM-DD matching timestamp.
+- merchant: title case, preserve brand caps (Starbucks, McDonald's, GoJek).
+- subcategory: short noun phrase, title case.
+- description: brief, ≤80 chars.
+- Unknown fields → empty string "" (NOT null, NOT omitted). Exception: mealType and notes may be omitted entirely.
+
+BILINGUAL HANDLING (Indonesian + English):
+- Amount: rb/ribu/k = ×1000; jt/juta/m = ×1,000,000. Ex: 45rb→45000, 1.5jt→1500000, 25k→25000.
+- Payment: tunai|cash→Cash; kartu kredit|cc|kredit→Credit Card; kartu debit|debit→Debit Card; gopay|ovo|dana|shopeepay|linkaja|qris|e-wallet|ewallet→E-Wallet; transfer|tf|bca|mandiri|bri|bni→Bank Transfer.
+- Meal: sarapan|breakfast→Breakfast; makan siang|lunch→Lunch; makan malam|dinner→Dinner; ngemil|snack|cemilan→Snack.
+- Category hints (keyword → category/subcategory):
+  warteg|warung|resto|restoran→Food & Dining/Restaurants; kopi|coffee→Food & Dining/Coffee/Snacks; bensin|bbm|pertamax|pertalite|spbu→Transportation/Gas/Fuel; parkir→Transportation/Parking; grab|gojek|ojol|maxim→Transportation/Ride Share; apotek|obat|pharmacy→Health/Pharmacy; dokter|klinik|rs|rumah sakit→Health/Medical; netflix|spotify|disney|youtube premium|hbo→Subscriptions/Streaming; indomaret|alfamart|hypermart|superindo|transmart→Shopping (or Food & Dining/Groceries if grocery-only)
+
+EXAMPLE:
+INPUT: "Beli kopi di Starbucks 45rb pakai gopay tadi sore"
+OUTPUT:
+{"timestamp":"2026-05-02T16:30:00+07:00","date":"2026-05-02","category":"Food & Dining","subcategory":"Coffee/Snacks","description":"Kopi di Starbucks","merchant":"Starbucks","amount":45000,"paymentMethod":"E-Wallet","mealType":"Snack"}${imageSection}
+
+REMINDER: Output the JSON object only. Nothing before. Nothing after. No thinking. No prose.`;
 };
 
 /**
