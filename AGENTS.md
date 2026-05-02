@@ -261,19 +261,24 @@ MCP servers are configured in the global OpenCode config at `~/.config/opencode/
 
 ### AI Model Configuration
 
-The OpenCode CLI is configured to use the following AI model on the VPS:
+Two transport paths are used:
 
-- **Current Model**: `openrouter/openrouter/free` (OpenRouter free auto-router)
-- **Provider**: OpenRouter (configured in `~/.config/opencode/opencode.json`)
-- **Config Location**: `~/.config/opencode/opencode.json` (VPS)
+1. **Extraction (text + image)** — direct HTTPS calls to OpenRouter
+   `https://openrouter.ai/api/v1/chat/completions` from `openrouter-client.ts`.
+   - Default model: `google/gemma-3-27b-it:free` (vision-capable, supports
+     `response_format: json_object`).
+   - Override via `OPENROUTER_EXTRACT_MODEL` env var on VPS.
+   - Bypasses opencode CLI to avoid tool/skill capability injection that
+     causes HTTP 404 ("No endpoints found that support tool use") on free
+     auto-routers.
 
-The OpenRouter free router automatically selects free vision-capable models per
-request, handling both text and image input, and falls back internally when a
-specific upstream model is unavailable.
+2. **Sheet writes** — opencode CLI with MCP (still required for
+   `google-docs-mcp`).
+   - Default model: `openrouter/openrouter/free` via opencode.
+   - Override via `AI_MODEL` env var.
+   - Config in `~/.config/opencode/opencode.json`.
 
-To change the model, edit the `AI_MODEL` environment variable in the `.env`
-file on VPS. The OpenRouter API key must be set as `OPENROUTER_API_KEY` in the
-same `.env` (used by the opencode CLI to authenticate against OpenRouter).
+The `OPENROUTER_API_KEY` env var on VPS is shared by both paths.
 
 ### Integration with Telegram Bot
 The expense tracking feature is exposed via the `telegram-bot-cloudflare` project, allowing users to:

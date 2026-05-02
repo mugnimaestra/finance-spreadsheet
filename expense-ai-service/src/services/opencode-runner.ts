@@ -1,5 +1,23 @@
 import { homedir } from "os";
 import { join } from "path";
+import {
+  chatCompletion,
+  imageToDataUrl,
+  type ChatMessage,
+} from "./openrouter-client";
+
+/**
+ * Model used for direct OpenRouter extraction calls (text and image).
+ * Defaults to a free vision-capable model that supports response_format.
+ * Override via env: OPENROUTER_EXTRACT_MODEL.
+ *
+ * NOTE: This is intentionally separate from MODEL_CHAIN (which is for the
+ * opencode CLI used by writeExpenseToSheets). The opencode CLI prefixes
+ * model ids with `openrouter/`; the direct OpenRouter API expects the bare
+ * id like `google/gemma-3-27b-it:free`.
+ */
+const OPENROUTER_EXTRACT_MODEL =
+  process.env.OPENROUTER_EXTRACT_MODEL || "google/gemma-3-27b-it:free";
 
 // ============================================================================
 // Types
@@ -847,22 +865,26 @@ export async function extractExpenseFromText(
     const prompt = getExtractionPrompt(false);
     const fullPrompt = `${prompt}\n\nHere is the text to extract expense information from:\n\n${text}`;
 
-    const result = await executeWithModelFallback(
-      // --agent expense-extract scopes opencode to a tools-disabled agent so
-      // google-docs-mcp tool defs aren't injected into the request. Gemini's
-      // strict JSON-schema validator rejects 3 of those tools (missing
-      // items.items), causing HTTP 400 on extraction. See
-      // scripts/setup-opencode-config.sh for the agent definition.
-      (model) => ["run", "-m", model, "--agent", "expense-extract", "--format", "json", "--", fullPrompt],
-      { operation: "extract-text" },
-      preferredModel
-    );
-    
-    const jsonStr = extractJsonFromOutput(result);
+    // Direct OpenRouter call — bypasses opencode CLI to avoid tool/skill
+    // injection that triggers HTTP 404 ("No endpoints found that support
+    // tool use") on the free auto-router. See openrouter-client.ts header.
+    const model = preferredModel || OPENROUTER_EXTRACT_MODEL;
+    console.log(`[extract-text] Using model: ${model}`);
+    const messages: ChatMessage[] = [
+      { role: "user", content: fullPrompt },
+    ];
+
+    const raw = await chatCompletion({
+      model,
+      messages,
+      responseFormat: "json_object",
+    });
+
+    const jsonStr = extractJsonFromOutput(raw) ?? raw.trim();
     if (!jsonStr) {
-      throw new Error("Could not extract JSON from opencode output");
+      throw new Error("Empty response from OpenRouter");
     }
-    
+
     const parsed = JSON.parse(jsonStr);
     const validated = validateExpenseData(parsed);
 
@@ -899,20 +921,33 @@ export async function extractExpenseFromImage(
 
     const prompt = getExtractionPrompt(true);
 
-    const result = await executeWithModelFallback(
-      // --agent expense-extract: see extractExpenseFromText for rationale.
-      // Critical for image extraction because OpenRouter routes images to
-      // Google Gemini, which rejects google-docs-mcp tool schemas with HTTP 400.
-      (model) => ["run", "-m", model, "--agent", "expense-extract", "--format", "json", "-f", imagePath, "--", prompt],
-      { operation: "extract-image" },
-      preferredModel
-    );
-    
-    const jsonStr = extractJsonFromOutput(result);
+    // Direct OpenRouter multimodal call. See extractExpenseFromText for
+    // why we bypass the opencode CLI here.
+    const model = preferredModel || OPENROUTER_EXTRACT_MODEL;
+    console.log(`[extract-image] Using model: ${model}`);
+    const dataUrl = await imageToDataUrl(imagePath);
+
+    const messages: ChatMessage[] = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: prompt },
+          { type: "image_url", image_url: { url: dataUrl } },
+        ],
+      },
+    ];
+
+    const raw = await chatCompletion({
+      model,
+      messages,
+      responseFormat: "json_object",
+    });
+
+    const jsonStr = extractJsonFromOutput(raw) ?? raw.trim();
     if (!jsonStr) {
-      throw new Error("Could not extract JSON from opencode output");
+      throw new Error("Empty response from OpenRouter");
     }
-    
+
     const parsed = JSON.parse(jsonStr);
     const validated = validateExpenseData(parsed);
 
