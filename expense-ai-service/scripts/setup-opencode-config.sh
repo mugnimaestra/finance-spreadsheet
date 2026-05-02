@@ -83,3 +83,45 @@ echo "=== Setup complete ==="
 echo ""
 echo "Verify openrouter is working:"
 echo "  opencode run --model openrouter/openrouter/free 'say hello'"
+
+# Step 4: Install the expense-extract agent.
+# This agent disables ALL tools (including google-docs-mcp). Extraction calls
+# pass --agent expense-extract so opencode does NOT inject tool defs into the
+# request. Critical because OpenRouter routes vision requests to Google Gemini,
+# whose strict JSON-schema validator rejects google-docs-mcp tools that declare
+# nested array schemas without items.items (appendSpreadsheetRows,
+# writeSpreadsheet, createSpreadsheet) — that produced HTTP 400 + a misleading
+# "Missing required field: date" error.
+#
+# writeExpenseToSheets does NOT use this agent, so it keeps full MCP access.
+echo ""
+echo "[4/4] Installing expense-extract agent (no-tools agent for extraction)..."
+AGENTS_DIR="$OPENCODE_CONFIG_DIR/agents"
+mkdir -p "$AGENTS_DIR"
+cat > "$AGENTS_DIR/expense-extract.md" << 'AGENTEOF'
+---
+description: Stateless expense data extractor. No tools, no MCP — just text/image in, JSON out. Used by extract endpoints to avoid loading google-docs-mcp tool defs that get rejected by Gemini's schema validator (HTTP 400). Do NOT use for write-sheets calls.
+mode: primary
+tools:
+  bash: false
+  edit: false
+  write: false
+  read: false
+  list: false
+  glob: false
+  grep: false
+  webfetch: false
+  websearch: false
+  task: false
+  todowrite: false
+  todoread: false
+  google-docs-mcp*: false
+  context7*: false
+permission:
+  bash: deny
+  edit: deny
+  webfetch: deny
+---
+You are an expense extraction service. Output ONLY a single JSON object that matches the schema in the user prompt. No prose, no markdown fences, no tool calls, no reasoning preamble.
+AGENTEOF
+echo "  → $AGENTS_DIR/expense-extract.md installed ✓"

@@ -343,7 +343,54 @@ function extractJsonFromOutput(output: string, _originalRaw?: string): string | 
   // preserve the actual NDJSON the model emitted (not the unwrapped text).
   const rawForDump = _originalRaw ?? output;
 
-  // Step 0: if this looks like an opencode --format json NDJSON stream
+  // Step 0a: surface opencode error events before attempting to extract text.
+  // opencode --format json writes provider errors as { type: "error", error: {...} }
+  // to stdout with exit 0. Without this guard the error envelope itself becomes
+  // the "extracted JSON" and the validator throws a misleading missing-field error
+  // (e.g. "Missing required field: date" when the model never even ran).
+  {
+    const lines = output.split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const evt = JSON.parse(trimmed);
+        if (evt && typeof evt === "object" && (evt as { type?: unknown }).type === "error") {
+          const e = evt as Record<string, unknown>;
+          const errObj = (e.error && typeof e.error === "object")
+            ? (e.error as Record<string, unknown>)
+            : {};
+          const data = (errObj.data && typeof errObj.data === "object")
+            ? (errObj.data as Record<string, unknown>)
+            : {};
+          const msg =
+            (typeof data.message === "string" ? data.message : "") ||
+            (typeof errObj.message === "string" ? errObj.message : "") ||
+            (typeof errObj.name === "string" ? errObj.name : "") ||
+            "opencode emitted error event";
+          const status = typeof data.statusCode === "number" || typeof data.statusCode === "string"
+            ? data.statusCode
+            : null;
+          const provider = typeof data.providerName === "string" ? data.providerName : null;
+          const suffix = [
+            status ? `HTTP ${status}` : null,
+            provider ? `provider=${provider}` : null,
+          ].filter(Boolean).join(", ");
+          throw new Error(
+            `opencode error event${suffix ? ` (${suffix})` : ""}: ${msg}`,
+          );
+        }
+      } catch (err) {
+        // Re-throw our own constructed error; otherwise (non-JSON or non-error
+        // event line), continue scanning.
+        if (err instanceof Error && err.message.startsWith("opencode error event")) {
+          throw err;
+        }
+      }
+    }
+  }
+
+  // Step 0b: if this looks like an opencode --format json NDJSON stream
   // (one JSON object per line), unwrap it to the concatenated text content.
   // Heuristic: first non-empty line parses as JSON with a "type" field
   // OR a "sessionID" field OR a "part" object — all three are reliable
@@ -801,7 +848,12 @@ export async function extractExpenseFromText(
     const fullPrompt = `${prompt}\n\nHere is the text to extract expense information from:\n\n${text}`;
 
     const result = await executeWithModelFallback(
-      (model) => ["run", "-m", model, "--format", "json", "--", fullPrompt],
+      // --agent expense-extract scopes opencode to a tools-disabled agent so
+      // google-docs-mcp tool defs aren't injected into the request. Gemini's
+      // strict JSON-schema validator rejects 3 of those tools (missing
+      // items.items), causing HTTP 400 on extraction. See
+      // scripts/setup-opencode-config.sh for the agent definition.
+      (model) => ["run", "-m", model, "--agent", "expense-extract", "--format", "json", "--", fullPrompt],
       { operation: "extract-text" },
       preferredModel
     );
@@ -848,7 +900,10 @@ export async function extractExpenseFromImage(
     const prompt = getExtractionPrompt(true);
 
     const result = await executeWithModelFallback(
-      (model) => ["run", "-m", model, "--format", "json", "-f", imagePath, "--", prompt],
+      // --agent expense-extract: see extractExpenseFromText for rationale.
+      // Critical for image extraction because OpenRouter routes images to
+      // Google Gemini, which rejects google-docs-mcp tool schemas with HTTP 400.
+      (model) => ["run", "-m", model, "--agent", "expense-extract", "--format", "json", "-f", imagePath, "--", prompt],
       { operation: "extract-image" },
       preferredModel
     );
