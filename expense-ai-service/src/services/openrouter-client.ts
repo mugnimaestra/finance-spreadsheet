@@ -138,29 +138,45 @@ export async function imageToDataUrl(imagePath: string): Promise<string> {
 }
 
 /**
- * Default rotation list of free vision-capable models on OpenRouter
- * that support response_format. Verified live against
- * https://openrouter.ai/api/v1/models on 2026-05-02.
+ * Default rotation list of free vision-capable models on OpenRouter.
+ * Verified live on 2026-05-02. Order:
+ *   1. Google Gemma family (json_object support, but shared Vertex quota)
+ *   2. NVIDIA NeMotron family (different quota pool, no json_object —
+ *      relies on prompt + extractJsonFromOutput)
+ *   3. Baidu Qianfan OCR (different quota pool, OCR-specialized for
+ *      image extraction fallback)
  *
- * Order: newest/largest → oldest/smallest. Override at runtime via
- * OPENROUTER_EXTRACT_MODELS env (comma-separated).
+ * When Google's shared quota is exhausted (HTTP 429 storm), rotation
+ * falls through to the non-Google pool.
  *
- * NOTE: google/gemma-3-* models advertise response_format support but
- * Google Vertex backend may reject {type:"json_object"} with HTTP 400
- * "JSON mode is not enabled for models/...". The rotation classifier
- * treats this as skippable so the loop continues.
- *
- * gemma-3-4b-it:free was removed because Google's Vertex backend
- * permanently rejects {response_format:{type:"json_object"}} on this
- * model with HTTP 400 "JSON mode is not enabled". The rotation
- * classifier handles it gracefully but it's a guaranteed-fail slot
- * that just consumes a backoff window.
+ * Override at runtime via OPENROUTER_EXTRACT_MODELS env (comma-separated).
  */
 export const DEFAULT_EXTRACT_MODELS = [
   "google/gemma-4-26b-a4b-it:free",
   "google/gemma-4-31b-it:free",
   "google/gemma-3-27b-it:free",
+  "nvidia/nemotron-nano-12b-v2-vl:free",
+  "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+  "baidu/qianfan-ocr-fast:free",
 ];
+
+/**
+ * Set of model IDs that accept {response_format: {type: "json_object"}}
+ * on their backend. Models NOT in this set will be called WITHOUT
+ * response_format, and the caller must rely on prompt instructions +
+ * extractJsonFromOutput for JSON parsing.
+ *
+ * Membership is determined by both:
+ *   1. The model's supported_parameters at https://openrouter.ai/api/v1/models
+ *   2. Empirical confirmation that the upstream backend honors the field
+ *      (some Google models advertise it but Vertex still rejects with
+ *      HTTP 400 "JSON mode is not enabled" — those are NOT in this set).
+ */
+export const JSON_MODE_CAPABLE: ReadonlySet<string> = new Set([
+  "google/gemma-4-26b-a4b-it:free",
+  "google/gemma-4-31b-it:free",
+  "google/gemma-3-27b-it:free",
+]);
 
 /**
  * Resolve the model rotation list from env or use the default.
@@ -186,12 +202,14 @@ export function getExtractModels(): string[] {
  * @param models    Ordered list of models to try. If empty, throws.
  * @param opts      Same as chatCompletion, but with `model` omitted —
  *                  the model is supplied per-attempt from the rotation list.
- * @param backoffMs Delay between attempts (default 500ms).
+ * @param backoffMs Deprecated and ignored. Backoff is jittered 2-5s between
+ *                  attempts; kept on the signature for backward compatibility.
  */
 export async function chatCompletionWithRotation(
   models: string[],
   opts: Omit<ChatCompletionOptions, "model">,
-  backoffMs = 500,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _backoffMs = 500,
 ): Promise<string> {
   if (!Array.isArray(models) || models.length === 0) {
     throw new Error("chatCompletionWithRotation: models list is empty");
@@ -202,10 +220,16 @@ export async function chatCompletionWithRotation(
   for (let i = 0; i < models.length; i++) {
     const model = models[i];
     try {
+      const useJsonMode = JSON_MODE_CAPABLE.has(model);
+      // chatCompletion only sets response_format when truthy (see line `if (opts.responseFormat)`),
+      // so spreading with responseFormat: undefined is safe for non-JSON-mode models.
+      const callOpts: ChatCompletionOptions = useJsonMode
+        ? { ...opts, model }
+        : { ...opts, model, responseFormat: undefined };
       console.log(
-        `[openrouter] Attempt ${i + 1}/${models.length} with model: ${model}`,
+        `[openrouter] Attempt ${i + 1}/${models.length} with model: ${model} (jsonMode=${useJsonMode})`,
       );
-      const result = await chatCompletion({ ...opts, model });
+      const result = await chatCompletion(callOpts);
       if (i > 0) {
         console.log(
           `[openrouter] Recovered on attempt ${i + 1}/${models.length} with ${model}. Earlier failures: ${failures.map((f) => `${f.model}=${f.error}`).join(" | ")}`,
@@ -251,8 +275,13 @@ export async function chatCompletionWithRotation(
         `[openrouter] Transient error on ${model} (attempt ${i + 1}/${models.length}): ${msg.slice(0, 200)}`,
       );
 
-      if (i < models.length - 1 && backoffMs > 0) {
-        await new Promise((r) => setTimeout(r, backoffMs));
+      if (i < models.length - 1) {
+        // Jittered backoff: 2000-5000ms. Helps transient upstream rate limits
+        // (especially Google Vertex's 429 storms) clear between attempts and
+        // de-correlates retries across concurrent requests.
+        const jitterMs = 2000 + Math.floor(Math.random() * 3000);
+        console.log(`[openrouter] Backing off ${jitterMs}ms before next attempt`);
+        await new Promise((r) => setTimeout(r, jitterMs));
       }
     }
   }
