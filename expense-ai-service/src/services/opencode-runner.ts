@@ -338,7 +338,11 @@ function extractTextFromOpencodeJsonStream(output: string): string {
  * - ANSI escape codes
  * - Multiple {...} candidates (returns the last valid one)
  */
-function extractJsonFromOutput(output: string): string | null {
+function extractJsonFromOutput(output: string, _originalRaw?: string): string | null {
+  // Track the original raw stdout across recursion so failure dumps
+  // preserve the actual NDJSON the model emitted (not the unwrapped text).
+  const rawForDump = _originalRaw ?? output;
+
   // Step 0: if this looks like an opencode --format json NDJSON stream
   // (one JSON object per line), unwrap it to the concatenated text content.
   // Heuristic: first non-empty line parses as JSON with a "type" field
@@ -358,8 +362,9 @@ function extractJsonFromOutput(output: string): string | null {
         const unwrapped = extractTextFromOpencodeJsonStream(output);
         if (unwrapped.trim()) {
           // Recurse with the unwrapped text so all the existing fence /
-          // candidate-balanced extraction logic still applies.
-          return extractJsonFromOutput(unwrapped);
+          // candidate-balanced extraction logic still applies. Pass raw
+          // stdout through so failure dumps capture the original NDJSON.
+          return extractJsonFromOutput(unwrapped, rawForDump);
         }
       }
     } catch {
@@ -419,22 +424,23 @@ function extractJsonFromOutput(output: string): string | null {
   // Step 4: diagnostic logging when extraction fails.
   console.error(
     "[extractJsonFromOutput] Failed to extract JSON.",
-    `raw_len=${output.length} cleaned_len=${cleaned.length}`,
+    `raw_len=${output.length} cleaned_len=${cleaned.length} original_raw_len=${rawForDump.length}`,
   );
   console.error(
-    "[extractJsonFromOutput] Raw output (first 500):",
+    "[extractJsonFromOutput] Unwrapped output (first 500):",
     output.slice(0, 500),
   );
   console.error(
-    "[extractJsonFromOutput] Raw output (last 500):",
+    "[extractJsonFromOutput] Unwrapped output (last 500):",
     output.slice(-500),
   );
-  // Persist the raw output to disk so we can inspect the exact NDJSON
-  // event stream that produced the failure (best-effort, fire-and-forget).
+  // Persist the ORIGINAL raw stdout (the NDJSON event stream) to disk so
+  // we can inspect exactly what opencode emitted that produced the failure.
+  // Best-effort, fire-and-forget.
   try {
     const dumpPath = `/tmp/opencode-failed-${Date.now()}.log`;
-    Bun.write(dumpPath, output).catch(() => {});
-    console.error("[extractJsonFromOutput] Raw output dumped to:", dumpPath);
+    Bun.write(dumpPath, rawForDump).catch(() => {});
+    console.error("[extractJsonFromOutput] Raw NDJSON dumped to:", dumpPath);
   } catch {
     // ignore dump failures
   }
