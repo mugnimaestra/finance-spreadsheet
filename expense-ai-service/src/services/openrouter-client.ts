@@ -138,18 +138,23 @@ export async function imageToDataUrl(imagePath: string): Promise<string> {
 }
 
 /**
- * Default rotation list of free vision-capable models on OpenRouter.
- * Order matters: tried first → last. All support multimodal input
- * (text + image_url) and JSON-mode response_format.
+ * Default rotation list of free vision-capable models on OpenRouter
+ * that support response_format. Verified live against
+ * https://openrouter.ai/api/v1/models on 2026-05-02.
  *
- * Override at runtime via OPENROUTER_EXTRACT_MODELS env (comma-separated).
+ * Order: newest/largest → oldest/smallest. Override at runtime via
+ * OPENROUTER_EXTRACT_MODELS env (comma-separated).
+ *
+ * NOTE: google/gemma-3-* models advertise response_format support but
+ * Google Vertex backend may reject {type:"json_object"} with HTTP 400
+ * "JSON mode is not enabled for models/...". The rotation classifier
+ * treats this as skippable so the loop continues.
  */
 export const DEFAULT_EXTRACT_MODELS = [
+  "google/gemma-4-26b-a4b-it:free",
+  "google/gemma-4-31b-it:free",
   "google/gemma-3-27b-it:free",
-  "google/gemini-2.0-flash-exp:free",
-  "meta-llama/llama-3.2-11b-vision-instruct:free",
-  "qwen/qwen2.5-vl-72b-instruct:free",
-  "mistralai/mistral-small-3.1-24b-instruct:free",
+  "google/gemma-3-4b-it:free",
 ];
 
 /**
@@ -204,13 +209,29 @@ export async function chatCompletionWithRotation(
       return result;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      // Detect transient HTTP status from the error message. The existing
-      // chatCompletion already throws with status codes embedded in the
-      // message (e.g. "OpenRouter HTTP 429: ..."). Match those.
+      // Transient: retry with the next model in the rotation.
+      //
+      // Includes:
+      //   - HTTP 408 timeout, 429 rate-limit, 5xx server errors
+      //   - HTTP 404 — model retired or "No endpoints found that support ..."
+      //   - HTTP 400 with capability-mismatch hints (JSON mode / response_format
+      //     not enabled or supported on this backend)
+      //   - Generic timeout / rate-limit / network words in the error string
+      //
+      // Non-transient (aborts rotation): genuine 400/401/402/403 such as
+      // malformed payload, bad auth, missing credits, content policy.
       const transient =
-        /\b(429|408|5\d\d)\b/.test(msg) ||
+        /\b(408|429|5\d\d)\b/.test(msg) ||
         /rate[\s-]?limit/i.test(msg) ||
-        /timeout/i.test(msg);
+        /timeout|ETIMEDOUT|ECONNRESET|ENOTFOUND|ECONNREFUSED/i.test(msg) ||
+        // 404: missing model / no endpoints
+        (/\b404\b/.test(msg) &&
+          /(no endpoints|not found|model.*not.*available)/i.test(msg)) ||
+        // 400 capability mismatch — try the next model
+        (/\b400\b/.test(msg) &&
+          /(json mode|response[_\s-]?format|not (enabled|supported)|tool use)/i.test(
+            msg,
+          ));
 
       failures.push({ model, error: msg.slice(0, 200) });
 
