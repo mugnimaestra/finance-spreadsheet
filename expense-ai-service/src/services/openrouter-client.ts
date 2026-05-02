@@ -149,12 +149,17 @@ export async function imageToDataUrl(imagePath: string): Promise<string> {
  * Google Vertex backend may reject {type:"json_object"} with HTTP 400
  * "JSON mode is not enabled for models/...". The rotation classifier
  * treats this as skippable so the loop continues.
+ *
+ * gemma-3-4b-it:free was removed because Google's Vertex backend
+ * permanently rejects {response_format:{type:"json_object"}} on this
+ * model with HTTP 400 "JSON mode is not enabled". The rotation
+ * classifier handles it gracefully but it's a guaranteed-fail slot
+ * that just consumes a backoff window.
  */
 export const DEFAULT_EXTRACT_MODELS = [
   "google/gemma-4-26b-a4b-it:free",
   "google/gemma-4-31b-it:free",
   "google/gemma-3-27b-it:free",
-  "google/gemma-3-4b-it:free",
 ];
 
 /**
