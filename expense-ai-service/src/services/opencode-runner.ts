@@ -2,22 +2,21 @@ import { homedir } from "os";
 import { join } from "path";
 import {
   chatCompletion,
+  chatCompletionWithRotation,
+  getExtractModels,
   imageToDataUrl,
   type ChatMessage,
 } from "./openrouter-client";
 
 /**
- * Model used for direct OpenRouter extraction calls (text and image).
- * Defaults to a free vision-capable model that supports response_format.
- * Override via env: OPENROUTER_EXTRACT_MODEL.
+ * Extraction model rotation is configured via env: OPENROUTER_EXTRACT_MODELS
+ * (comma-separated). See openrouter-client.ts -> getExtractModels().
  *
  * NOTE: This is intentionally separate from MODEL_CHAIN (which is for the
  * opencode CLI used by writeExpenseToSheets). The opencode CLI prefixes
  * model ids with `openrouter/`; the direct OpenRouter API expects the bare
  * id like `google/gemma-3-27b-it:free`.
  */
-const OPENROUTER_EXTRACT_MODEL =
-  process.env.OPENROUTER_EXTRACT_MODEL || "google/gemma-3-27b-it:free";
 
 // ============================================================================
 // Types
@@ -868,14 +867,13 @@ export async function extractExpenseFromText(
     // Direct OpenRouter call — bypasses opencode CLI to avoid tool/skill
     // injection that triggers HTTP 404 ("No endpoints found that support
     // tool use") on the free auto-router. See openrouter-client.ts header.
-    const model = preferredModel || OPENROUTER_EXTRACT_MODEL;
-    console.log(`[extract-text] Using model: ${model}`);
+    const models = getExtractModels();
+    console.log(`[extract-text] Rotation models: ${models.join(", ")}`);
     const messages: ChatMessage[] = [
       { role: "user", content: fullPrompt },
     ];
 
-    const raw = await chatCompletion({
-      model,
+    const raw = await chatCompletionWithRotation(models, {
       messages,
       responseFormat: "json_object",
     });
@@ -923,8 +921,8 @@ export async function extractExpenseFromImage(
 
     // Direct OpenRouter multimodal call. See extractExpenseFromText for
     // why we bypass the opencode CLI here.
-    const model = preferredModel || OPENROUTER_EXTRACT_MODEL;
-    console.log(`[extract-image] Using model: ${model}`);
+    const models = getExtractModels();
+    console.log(`[extract-image] Rotation models: ${models.join(", ")}`);
     const dataUrl = await imageToDataUrl(imagePath);
 
     const messages: ChatMessage[] = [
@@ -937,8 +935,7 @@ export async function extractExpenseFromImage(
       },
     ];
 
-    const raw = await chatCompletion({
-      model,
+    const raw = await chatCompletionWithRotation(models, {
       messages,
       responseFormat: "json_object",
     });

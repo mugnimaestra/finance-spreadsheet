@@ -136,3 +136,103 @@ export async function imageToDataUrl(imagePath: string): Promise<string> {
   const buf = await readFile(imagePath);
   return `data:${mime};base64,${buf.toString("base64")}`;
 }
+
+/**
+ * Default rotation list of free vision-capable models on OpenRouter.
+ * Order matters: tried first → last. All support multimodal input
+ * (text + image_url) and JSON-mode response_format.
+ *
+ * Override at runtime via OPENROUTER_EXTRACT_MODELS env (comma-separated).
+ */
+export const DEFAULT_EXTRACT_MODELS = [
+  "google/gemma-3-27b-it:free",
+  "google/gemini-2.0-flash-exp:free",
+  "meta-llama/llama-3.2-11b-vision-instruct:free",
+  "qwen/qwen2.5-vl-72b-instruct:free",
+  "mistralai/mistral-small-3.1-24b-instruct:free",
+];
+
+/**
+ * Resolve the model rotation list from env or use the default.
+ */
+export function getExtractModels(): string[] {
+  const env = process.env.OPENROUTER_EXTRACT_MODELS?.trim();
+  if (!env) return [...DEFAULT_EXTRACT_MODELS];
+  return env
+    .split(",")
+    .map((m) => m.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Call chatCompletion across a rotation of models. Retries on transient
+ * provider errors (HTTP 429, 408, 5xx) with the next model in the list.
+ * Returns the first successful response.
+ *
+ * Non-transient errors (4xx other than 429/408) abort immediately — no
+ * point retrying a malformed request or a missing model with another model
+ * unless the failure is rate-limit / timeout / server-side.
+ *
+ * @param models    Ordered list of models to try. If empty, throws.
+ * @param opts      Same as chatCompletion, but with `model` omitted —
+ *                  the model is supplied per-attempt from the rotation list.
+ * @param backoffMs Delay between attempts (default 500ms).
+ */
+export async function chatCompletionWithRotation(
+  models: string[],
+  opts: Omit<ChatCompletionOptions, "model">,
+  backoffMs = 500,
+): Promise<string> {
+  if (!Array.isArray(models) || models.length === 0) {
+    throw new Error("chatCompletionWithRotation: models list is empty");
+  }
+
+  const failures: { model: string; error: string }[] = [];
+
+  for (let i = 0; i < models.length; i++) {
+    const model = models[i];
+    try {
+      console.log(
+        `[openrouter] Attempt ${i + 1}/${models.length} with model: ${model}`,
+      );
+      const result = await chatCompletion({ ...opts, model });
+      if (i > 0) {
+        console.log(
+          `[openrouter] Recovered on attempt ${i + 1}/${models.length} with ${model}. Earlier failures: ${failures.map((f) => `${f.model}=${f.error}`).join(" | ")}`,
+        );
+      }
+      return result;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Detect transient HTTP status from the error message. The existing
+      // chatCompletion already throws with status codes embedded in the
+      // message (e.g. "OpenRouter HTTP 429: ..."). Match those.
+      const transient =
+        /\b(429|408|5\d\d)\b/.test(msg) ||
+        /rate[\s-]?limit/i.test(msg) ||
+        /timeout/i.test(msg);
+
+      failures.push({ model, error: msg.slice(0, 200) });
+
+      if (!transient) {
+        console.error(
+          `[openrouter] Non-transient error on ${model}, aborting rotation: ${msg.slice(0, 300)}`,
+        );
+        throw err;
+      }
+
+      console.warn(
+        `[openrouter] Transient error on ${model} (attempt ${i + 1}/${models.length}): ${msg.slice(0, 200)}`,
+      );
+
+      if (i < models.length - 1 && backoffMs > 0) {
+        await new Promise((r) => setTimeout(r, backoffMs));
+      }
+    }
+  }
+
+  const summary = failures.map((f) => `${f.model}: ${f.error}`).join(" || ");
+  throw new Error(
+    `OpenRouter rotation exhausted after ${models.length} attempts. Failures: ${summary}`,
+  );
+}
