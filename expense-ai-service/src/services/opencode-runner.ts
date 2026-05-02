@@ -310,6 +310,53 @@ function extractJsonFromOutput(output: string): string | null {
 }
 
 /**
+ * Sanitize parsed expense fields before validation.
+ *
+ * Free models inconsistently emit `"mealType": ""` and `"notes": ""` instead
+ * of omitting the keys entirely. This pure helper:
+ *   1. Drops `mealType` / `notes` if they are empty / whitespace-only / null.
+ *   2. Trims whitespace on all known string fields.
+ *
+ * It does NOT enforce enums or required-field rules — those remain the job
+ * of `validateExpenseData`. This is purely defense-in-depth normalization.
+ */
+function sanitizeExpenseFields(expense: Record<string, unknown>): void {
+  const stringFields = [
+    "timestamp",
+    "date",
+    "category",
+    "subcategory",
+    "description",
+    "merchant",
+    "paymentMethod",
+    "mealType",
+    "notes",
+  ] as const;
+
+  // Trim whitespace on all string-valued fields.
+  for (const field of stringFields) {
+    const value = expense[field];
+    if (typeof value === "string") {
+      expense[field] = value.trim();
+    }
+  }
+
+  // Drop empty/whitespace-only optional fields entirely so downstream
+  // enum checks don't see "" and reject it.
+  const optionalFields = ["mealType", "notes"] as const;
+  for (const field of optionalFields) {
+    const value = expense[field];
+    if (
+      value === null ||
+      value === undefined ||
+      (typeof value === "string" && value.trim() === "")
+    ) {
+      delete expense[field];
+    }
+  }
+}
+
+/**
  * Validates and normalizes expense data.
  */
 function validateExpenseData(data: unknown): ExpenseData {
@@ -318,6 +365,9 @@ function validateExpenseData(data: unknown): ExpenseData {
   }
 
   const expense = data as Record<string, unknown>;
+
+  // Sanitize before validation: drop empty optional fields and trim strings.
+  sanitizeExpenseFields(expense);
 
   const requiredFields = [
     "timestamp",
