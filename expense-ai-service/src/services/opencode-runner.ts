@@ -25,46 +25,23 @@ export type OpenCodeResult = {
 };
 
 // ============================================================================
-// Model Configuration - Multi-Model Fallback Chain
+// Model Configuration
 // ============================================================================
 
 /**
- * Model fallback chain configuration:
- * 1. Primary: From process.env.OPENCODE_MODEL (user-configurable)
- * 2. Fallback: Kimi K2.5 TEE via Chutes (hardcoded)
- * 3. Last resort: Gemini 1.5 Flash (hardcoded)
+ * Model configuration:
+ * - Primary: From process.env.AI_MODEL (user-configurable)
+ * - Default: OpenRouter free auto-router which selects free vision-capable models
+ *   per request and handles internal fallback automatically.
  */
 const PRIMARY_MODEL = process.env.AI_MODEL || process.env.OPENCODE_MODEL;
 
-// If a specific model is set, use only that model (no fallback)
-// Otherwise use the fallback chain
-const MODEL_CHAIN: string[] = PRIMARY_MODEL 
+const MODEL_CHAIN: string[] = PRIMARY_MODEL
   ? [PRIMARY_MODEL]
-  : [
-      "opencode/big-pickle",
-      "github-copilot/gemini-3-flash-preview",
-      "chutes/moonshotai/Kimi-K2.5-TEE", 
-      "google/gemini-1.5-flash",
-    ];
+  : ["openrouter/openrouter/free"];
 
 // Backwards compatibility - first model in chain is the default
 const DEFAULT_MODEL = MODEL_CHAIN[0];
-
-// ============================================================================
-// Agent Wrapper Configuration
-// ============================================================================
-
-/**
- * Agent wrapper pattern: 
- * When enabled, uses a free model that delegates to a custom agent (general-opus)
- * This creates a two-hop system: free model → custom agent → actual work
- * Similar to discord-trading-monitor's opencode-agent-wrapper
- */
-const USE_AGENT_WRAPPER = process.env.OPENCODE_AGENT_WRAPPER !== "false"; // default true
-
-const AGENT_WRAPPER_MODEL = "opencode/big-pickle";
-
-const AGENT_DELEGATION_SUFFIX = "\n\ndelegate this task into @general-opus";
 
 // ============================================================================
 // Constants
@@ -430,7 +407,7 @@ class ModelChainExhaustedError extends Error {
  * @param preferredModel - Optional preferred model to try first (overrides MODEL_CHAIN[0])
  */
 async function executeWithModelFallback(
-  buildArgs: (model: string, applyWrapper?: boolean) => string[],
+  buildArgs: (model: string) => string[],
   context: { operation: string },
   preferredModel?: string
 ): Promise<string> {
@@ -462,11 +439,8 @@ async function executeWithModelFallback(
       
       console.log(`[${context.operation}] Trying model ${i + 1}/${chain.length}: ${model}`);
       
-      // Apply agent wrapper if enabled
-      const applyWrapper = USE_AGENT_WRAPPER && model === AGENT_WRAPPER_MODEL;
-      
       try {
-        const args = buildArgs(model, applyWrapper);
+        const args = buildArgs(model);
         const result = await withRetry(
           () => executeOpenCode(args, controller.signal),
           { model, attempt: 1 },
@@ -527,10 +501,7 @@ export async function extractExpenseFromText(
     const fullPrompt = `${prompt}\n\nHere is the text to extract expense information from:\n\n${text}`;
 
     const result = await executeWithModelFallback(
-      (model, applyWrapper) => {
-        const promptToUse = applyWrapper ? fullPrompt + AGENT_DELEGATION_SUFFIX : fullPrompt;
-        return ["run", "-m", model, promptToUse];
-      },
+      (model) => ["run", "-m", model, fullPrompt],
       { operation: "extract-text" },
       preferredModel
     );
@@ -577,10 +548,7 @@ export async function extractExpenseFromImage(
     const prompt = getExtractionPrompt(true);
 
     const result = await executeWithModelFallback(
-      (model, applyWrapper) => {
-        const promptToUse = applyWrapper ? prompt + AGENT_DELEGATION_SUFFIX : prompt;
-        return ["run", "-m", model, "-f", imagePath, "--", promptToUse];
-      },
+      (model) => ["run", "-m", model, "-f", imagePath, "--", prompt],
       { operation: "extract-image" },
       preferredModel
     );
@@ -620,10 +588,7 @@ export async function writeExpenseToSheets(
     const prompt = getWritePrompt(expense);
 
     const result = await executeWithModelFallback(
-      (model, applyWrapper) => {
-        const promptToUse = applyWrapper ? prompt + AGENT_DELEGATION_SUFFIX : prompt;
-        return ["run", "-m", model, promptToUse];
-      },
+      (model) => ["run", "-m", model, prompt],
       { operation: "write-sheets" },
       preferredModel
     );

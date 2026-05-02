@@ -188,6 +188,11 @@ The VPS uses git-based deployment. To deploy changes:
    ssh mugnimaestra@155.94.154.237 'cd ~/projects/finance-spreadsheet/expense-ai-service && bash scripts/deploy.sh'
    ```
 
+> **Note**: The VPS `.env` must contain a valid `OPENROUTER_API_KEY` for the
+> opencode CLI to authenticate against OpenRouter. After updating `.env`, run
+> `bash scripts/setup-opencode-config.sh` to sync the key into
+> `~/.config/opencode/opencode.json`, then restart the service.
+
 Or manually:
 ```
 cd ~/projects/finance-spreadsheet && git pull origin main
@@ -258,17 +263,17 @@ MCP servers are configured in the global OpenCode config at `~/.config/opencode/
 
 The OpenCode CLI is configured to use the following AI model on the VPS:
 
-- **Current Model**: `opencode/big-pickle` (free model)
-- **Custom Agent**: `general-opus` (claude-opus-4.6 via GitHub Copilot)
-- **Provider**: OpenCode (free) → GitHub Copilot (delegated)
+- **Current Model**: `openrouter/openrouter/free` (OpenRouter free auto-router)
+- **Provider**: OpenRouter (configured in `~/.config/opencode/opencode.json`)
 - **Config Location**: `~/.config/opencode/opencode.json` (VPS)
 
-To change the model, edit the `AI_MODEL` environment variable in the `.env` file on VPS.
+The OpenRouter free router automatically selects free vision-capable models per
+request, handling both text and image input, and falls back internally when a
+specific upstream model is unavailable.
 
-The agent wrapper pattern:
-- Uses free `opencode/big-pickle` model which delegates to `@general-opus`
-- The `general-opus` subagent uses Claude Opus for actual expense extraction
-- Toggle: Set `OPENCODE_AGENT_WRAPPER=false` to disable wrapper and use model directly
+To change the model, edit the `AI_MODEL` environment variable in the `.env`
+file on VPS. The OpenRouter API key must be set as `OPENROUTER_API_KEY` in the
+same `.env` (used by the opencode CLI to authenticate against OpenRouter).
 
 ### Integration with Telegram Bot
 The expense tracking feature is exposed via the `telegram-bot-cloudflare` project, allowing users to:
