@@ -239,37 +239,93 @@ function findAllBalancedJsonCandidates(s: string): string[] {
 
 /**
  * Parse opencode --format json NDJSON stdout and return the concatenated
- * text from all `text` events, in order.
+ * model response text.
  *
- * opencode emits one JSON object per line. We only care about events with
- * type === "text", whose .part.text holds the actual model response chunks.
+ * opencode emits one JSON object per line. The CLI source (packages/
+ * opencode/src/cli/cmd/run.ts) emits a `text` event for every text part
+ * once `part.time.end` is set, with the FULL accumulated `part.text`
+ * snapshot on the part. We therefore:
+ *
+ *   1. Collect any event where `part.type === "text"` and `part.text` is
+ *      a string. We match on `part.type` rather than `evt.type` so we
+ *      survive minor schema renames (e.g. "text-delta", "text-snapshot").
+ *   2. Deduplicate by `part.id`, keeping the LONGEST snapshot per part.
+ *      Defends against the case where the same part is emitted multiple
+ *      times during streaming (we want the final, longest snapshot).
+ *   3. Sort parts by their first-seen timestamp so multi-part responses
+ *      concatenate in the order the model produced them.
+ *
+ * Reasoning events are intentionally skipped — they go in `<think>` /
+ * separate `reasoning` parts and are stripped downstream by
+ * `extractJsonFromOutput`'s candidate finder anyway.
  *
  * Lines that are not valid JSON are skipped silently (defensive).
  */
 function extractTextFromOpencodeJsonStream(output: string): string {
-  const lines = output.split("\n");
-  const chunks: string[] = [];
+  // partId -> { text, firstSeen }
+  const byPart = new Map<string, { text: string; firstSeen: number }>();
+  // Anonymous text events (no part.id) — keep all in order.
+  const anonymous: Array<{ text: string; ts: number; idx: number }> = [];
+  let idx = 0;
 
-  for (const line of lines) {
+  for (const line of output.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
+    let evt: unknown;
     try {
-      const evt = JSON.parse(trimmed);
-      if (
-        evt &&
-        typeof evt === "object" &&
-        evt.type === "text" &&
-        evt.part &&
-        typeof evt.part.text === "string"
-      ) {
-        chunks.push(evt.part.text);
-      }
+      evt = JSON.parse(trimmed);
     } catch {
-      // not a JSON line — skip
+      continue;
+    }
+    if (!evt || typeof evt !== "object") continue;
+
+    const e = evt as Record<string, unknown>;
+    const part = (e.part && typeof e.part === "object")
+      ? (e.part as Record<string, unknown>)
+      : null;
+    if (!part) continue;
+
+    // Match on part.type === "text" so we survive renames of evt.type
+    // (e.g. "text-delta" / "text-snapshot"). Also keep evt.type === "text"
+    // as a fallback for older event shapes.
+    const partType = typeof part.type === "string" ? part.type : "";
+    const evtType = typeof e.type === "string" ? e.type : "";
+    const isText =
+      partType === "text" ||
+      (evtType === "text" && typeof part.text === "string");
+    if (!isText) continue;
+
+    const text = typeof part.text === "string" ? part.text : "";
+    if (!text) continue;
+
+    const ts = typeof e.timestamp === "number" ? e.timestamp : Date.now();
+    const partId = typeof part.id === "string" ? part.id : "";
+
+    if (!partId) {
+      anonymous.push({ text, ts, idx: idx++ });
+      continue;
+    }
+
+    const existing = byPart.get(partId);
+    if (!existing) {
+      byPart.set(partId, { text, firstSeen: ts });
+    } else if (text.length > existing.text.length) {
+      // Keep the longest snapshot for this part (handles snapshot-style
+      // streaming where the same part is emitted with growing text).
+      byPart.set(partId, { text, firstSeen: existing.firstSeen });
     }
   }
 
-  return chunks.join("");
+  const parts = [
+    ...Array.from(byPart.entries()).map(([id, v]) => ({
+      text: v.text,
+      ts: v.firstSeen,
+      id,
+    })),
+    ...anonymous.map((a) => ({ text: a.text, ts: a.ts, id: `__anon_${a.idx}` })),
+  ];
+  parts.sort((a, b) => a.ts - b.ts);
+  return parts.map((p) => p.text).join("");
 }
 
 /**
@@ -285,12 +341,20 @@ function extractTextFromOpencodeJsonStream(output: string): string {
 function extractJsonFromOutput(output: string): string | null {
   // Step 0: if this looks like an opencode --format json NDJSON stream
   // (one JSON object per line), unwrap it to the concatenated text content.
-  // Heuristic: first non-empty line parses as JSON with a "type" field.
+  // Heuristic: first non-empty line parses as JSON with a "type" field
+  // OR a "sessionID" field OR a "part" object — all three are reliable
+  // markers of opencode's NDJSON event schema.
   const firstNonEmpty = output.split("\n").map(l => l.trim()).find(Boolean);
   if (firstNonEmpty && firstNonEmpty.startsWith("{")) {
     try {
       const probe = JSON.parse(firstNonEmpty);
-      if (probe && typeof probe === "object" && typeof probe.type === "string") {
+      if (
+        probe &&
+        typeof probe === "object" &&
+        (typeof probe.type === "string" ||
+          typeof probe.sessionID === "string" ||
+          (probe.part && typeof probe.part === "object"))
+      ) {
         const unwrapped = extractTextFromOpencodeJsonStream(output);
         if (unwrapped.trim()) {
           // Recurse with the unwrapped text so all the existing fence /
@@ -365,6 +429,15 @@ function extractJsonFromOutput(output: string): string | null {
     "[extractJsonFromOutput] Raw output (last 500):",
     output.slice(-500),
   );
+  // Persist the raw output to disk so we can inspect the exact NDJSON
+  // event stream that produced the failure (best-effort, fire-and-forget).
+  try {
+    const dumpPath = `/tmp/opencode-failed-${Date.now()}.log`;
+    Bun.write(dumpPath, output).catch(() => {});
+    console.error("[extractJsonFromOutput] Raw output dumped to:", dumpPath);
+  } catch {
+    // ignore dump failures
+  }
   return null;
 }
 
