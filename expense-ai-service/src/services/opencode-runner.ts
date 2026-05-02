@@ -166,41 +166,122 @@ Return only a brief confirmation message like "Expense successfully appended to 
 // ============================================================================
 
 /**
- * Extracts JSON from a string that may contain non-JSON content.
+ * Scans forward through a string and collects all top-level balanced
+ * `{...}` substrings, ignoring braces that appear inside string literals.
+ * Returns them in document order.
  */
-function extractJsonFromOutput(output: string): string | null {
-  const trimmed = output.trim();
-  try {
-    JSON.parse(trimmed);
-    return trimmed;
-  } catch {
-    // Continue to try other methods
-  }
+function findAllBalancedJsonCandidates(s: string): string[] {
+  const candidates: string[] = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escape = false;
 
-  const jsonMatch = output.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    try {
-      JSON.parse(jsonMatch[0]);
-      return jsonMatch[0];
-    } catch {
-      // Continue to try nested match
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (inString) {
+      if (ch === "\\") {
+        escape = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === "}") {
+      if (depth > 0) {
+        depth--;
+        if (depth === 0 && start !== -1) {
+          candidates.push(s.slice(start, i + 1));
+          start = -1;
+        }
+      }
     }
   }
+  return candidates;
+}
 
-  const codeBlockMatch = output.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (codeBlockMatch) {
-    const codeContent = codeBlockMatch[1].trim();
-    const innerJsonMatch = codeContent.match(/\{[\s\S]*\}/);
-    if (innerJsonMatch) {
-      try {
-        JSON.parse(innerJsonMatch[0]);
-        return innerJsonMatch[0];
-      } catch {
-        // Continue
+/**
+ * Extracts JSON from opencode CLI output.
+ *
+ * Handles:
+ * - Pure JSON output
+ * - JSON in ```json fences
+ * - JSON after "Thinking: ... {example}" reasoning block
+ * - ANSI escape codes
+ * - Multiple {...} candidates (returns the last valid one)
+ */
+function extractJsonFromOutput(output: string): string | null {
+  // Step 1: strip noise (ANSI codes + opencode header line).
+  let cleaned = output.replace(/\x1b\[[0-9;]*m/g, "");
+  cleaned = cleaned.replace(/^>\s*build\s*·.*$/gm, "");
+  cleaned = cleaned.trim();
+
+  // Fast path: entire output is valid JSON.
+  try {
+    JSON.parse(cleaned);
+    return cleaned;
+  } catch {
+    // continue
+  }
+
+  // Fast path: fenced code block(s). Try each, prefer the LAST valid one.
+  const fenceRegex = /```(?:json)?\s*([\s\S]*?)```/g;
+  const fenceMatches: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = fenceRegex.exec(cleaned)) !== null) {
+    fenceMatches.push(m[1]);
+  }
+  for (let i = fenceMatches.length - 1; i >= 0; i--) {
+    const inner = fenceMatches[i].trim();
+    try {
+      JSON.parse(inner);
+      return inner;
+    } catch {
+      const innerCandidates = findAllBalancedJsonCandidates(inner);
+      for (let j = innerCandidates.length - 1; j >= 0; j--) {
+        try {
+          JSON.parse(innerCandidates[j]);
+          return innerCandidates[j];
+        } catch {
+          // try next
+        }
       }
     }
   }
 
+  // Step 3: collect all balanced top-level JSON objects, return LAST valid one.
+  const candidates = findAllBalancedJsonCandidates(cleaned);
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    try {
+      JSON.parse(candidates[i]);
+      return candidates[i];
+    } catch {
+      // try previous
+    }
+  }
+
+  // Step 4: diagnostic logging when extraction fails.
+  console.error(
+    "[extractJsonFromOutput] Failed to extract JSON. Output (first 500):",
+    cleaned.slice(0, 500),
+  );
+  console.error(
+    "[extractJsonFromOutput] Output (last 500):",
+    cleaned.slice(-500),
+  );
   return null;
 }
 
