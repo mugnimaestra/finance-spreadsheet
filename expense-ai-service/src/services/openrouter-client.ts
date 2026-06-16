@@ -138,26 +138,13 @@ export async function imageToDataUrl(imagePath: string): Promise<string> {
 }
 
 /**
- * Default rotation list of free vision-capable models on OpenRouter.
- * Verified live on 2026-05-02. Order:
- *   1. Google Gemma family (json_object support, but shared Vertex quota)
- *   2. NVIDIA NeMotron family (different quota pool, no json_object —
- *      relies on prompt + extractJsonFromOutput)
- *   3. Baidu Qianfan OCR (different quota pool, OCR-specialized for
- *      image extraction fallback)
- *
- * When Google's shared quota is exhausted (HTTP 429 storm), rotation
- * falls through to the non-Google pool.
+ * Default extraction model. Uses OpenRouter's free auto-router which
+ * selects a free vision-capable model per request.
  *
  * Override at runtime via OPENROUTER_EXTRACT_MODELS env (comma-separated).
  */
 export const DEFAULT_EXTRACT_MODELS = [
-  "google/gemma-4-26b-a4b-it:free",
-  "google/gemma-4-31b-it:free",
-  "google/gemma-3-27b-it:free",
-  "nvidia/nemotron-nano-12b-v2-vl:free",
-  "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
-  "baidu/qianfan-ocr-fast:free",
+  "openrouter/free",
 ];
 
 /**
